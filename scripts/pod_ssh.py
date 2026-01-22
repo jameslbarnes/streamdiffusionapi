@@ -45,8 +45,12 @@ def get_pod_ssh_host():
         }
     )
 
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        result = json.loads(resp.read().decode('utf-8'))
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        print(f"API Error: {e.code} - check RUNPOD_API_KEY", file=sys.stderr)
+        sys.exit(1)
 
     pods = result.get('data', {}).get('myself', {}).get('pods', [])
     running = [p for p in pods if p.get('desiredStatus') == 'RUNNING']

@@ -1,6 +1,7 @@
 """MediaMTX integration for WHIP/WHEP/RTMP streaming."""
 
 import asyncio
+import base64
 import logging
 import os
 import platform
@@ -10,6 +11,75 @@ from pathlib import Path
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+def fetch_twilio_turn_servers() -> list[dict] | None:
+    """Fetch TURN server credentials from Twilio API.
+
+    Returns list of ICE server configs for MediaMTX, or None if unavailable.
+    """
+    account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
+    auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
+
+    if not account_sid or not auth_token:
+        logger.warning("TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN not set - WebRTC NAT traversal may fail")
+        return None
+
+    try:
+        import urllib.request
+        import json
+
+        # Twilio Tokens API endpoint
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Tokens.json"
+
+        # Basic auth
+        credentials = base64.b64encode(f"{account_sid}:{auth_token}".encode()).decode()
+
+        req = urllib.request.Request(
+            url,
+            method="POST",
+            headers={
+                "Authorization": f"Basic {credentials}",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            data=b"",  # Empty POST body
+        )
+
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+
+        ice_servers = data.get("ice_servers", [])
+        if not ice_servers:
+            logger.warning("Twilio returned no ICE servers")
+            return None
+
+        # Convert to MediaMTX format
+        mtx_servers = []
+        for server in ice_servers:
+            url = server.get("url") or server.get("urls")
+            if isinstance(url, list):
+                url = url[0]  # Take first URL
+
+            if not url:
+                continue
+
+            entry = {"url": url}
+
+            # Add credentials for TURN servers
+            if "turn:" in url or "turns:" in url:
+                if server.get("username"):
+                    entry["username"] = server["username"]
+                if server.get("credential"):
+                    entry["password"] = server["credential"]
+
+            mtx_servers.append(entry)
+
+        logger.info(f"Fetched {len(mtx_servers)} ICE servers from Twilio")
+        return mtx_servers
+
+    except Exception as e:
+        logger.error(f"Failed to fetch Twilio TURN credentials: {e}")
+        return None
 
 
 class MediaMTXManager:
@@ -74,6 +144,23 @@ class MediaMTXManager:
 
     def _generate_config(self, streams: list[str] | None = None) -> str:
         """Generate MediaMTX configuration."""
+        # Fetch TURN servers from Twilio for NAT traversal
+        ice_servers = fetch_twilio_turn_servers()
+
+        # Build ICE servers YAML block
+        if ice_servers:
+            ice_yaml_lines = []
+            for server in ice_servers:
+                ice_yaml_lines.append(f"  - url: {server['url']}")
+                if "username" in server:
+                    ice_yaml_lines.append(f"    username: {server['username']}")
+                if "password" in server:
+                    ice_yaml_lines.append(f"    password: {server['password']}")
+            ice_servers_yaml = "\n".join(ice_yaml_lines)
+        else:
+            # Fallback to Google's public STUN server (no TURN = may fail behind NAT)
+            ice_servers_yaml = "  - url: stun:stun.l.google.com:19302"
+
         config = f"""
 # MediaMTX configuration for StreamDiffusion API
 # Auto-generated - do not edit manually
@@ -104,7 +191,8 @@ hlsSegmentDuration: 1s
 # WebRTC settings
 webrtc: yes
 webrtcAddress: :{self.WEBRTC_PORT}
-webrtcICEServers2: []
+webrtcICEServers2:
+{ice_servers_yaml}
 
 # Path defaults
 pathDefaults:
