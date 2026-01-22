@@ -368,7 +368,10 @@ class FrameBridge:
             reader.start(self._input_buffers[stream_id])
 
             # Create writer for local output (MediaMTX)
-            writer = FFmpegWriter(rtsp_output_url, width, height)
+            # Use RTMP internally as it's more reliable than RTSP for publishing
+            rtmp_output_url = rtsp_output_url.replace("rtsp://", "rtmp://").replace(":8554/", ":1935/")
+            logger.info(f"Setting up output writer: {rtmp_output_url}")
+            writer = FFmpegWriter(rtmp_output_url, width, height)
             self._writers[stream_id] = writer
             writer.start()
 
