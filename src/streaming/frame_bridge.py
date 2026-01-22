@@ -226,7 +226,8 @@ class FFmpegWriter:
             return
 
         # FFmpeg command to encode and stream
-        # Use RTSP TCP transport for reliability with MediaMTX
+        # Use libopenh264 as it's more commonly available than libx264
+        # Fall back to h264 native encoder if needed
         cmd = [
             "ffmpeg",
             "-f", "rawvideo",
@@ -234,13 +235,9 @@ class FFmpegWriter:
             "-s", f"{self.width}x{self.height}",
             "-r", str(self.fps),
             "-i", "-",
-            "-c:v", "libx264",
-            "-preset", self.preset,
-            "-tune", "zerolatency",
-            "-profile:v", "high",
-            "-bf", "0",  # No B-frames for lower latency
+            "-c:v", "libopenh264",  # More widely available than libx264
+            "-allow_skip_frames", "1",  # Allow frame skipping for real-time
             "-g", str(self.fps),  # Keyframe every second
-            "-rtsp_transport", "tcp",  # Use TCP for RTSP output
             "-f", self.output_format,
             self.stream_url,
         ]
