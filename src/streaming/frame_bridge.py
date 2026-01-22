@@ -370,7 +370,19 @@ class FrameBridge:
             logger.info(f"Setting up output writer: {rtmp_output_url}")
             writer = FFmpegWriter(rtmp_output_url, width, height)
             self._writers[stream_id] = writer
-            writer.start()
+            try:
+                writer.start()
+                # Verify the process actually started
+                if writer._process is None:
+                    logger.error(f"FFmpeg writer process is None after start()")
+                elif writer._process.poll() is not None:
+                    logger.error(f"FFmpeg writer exited immediately with code: {writer._process.poll()}")
+                else:
+                    logger.info(f"FFmpeg writer process started with PID: {writer._process.pid}")
+            except Exception as e:
+                logger.error(f"Exception starting FFmpeg writer: {e}")
+                import traceback
+                traceback.print_exc()
 
             # Create writer for external RTMP output if specified
             if output_rtmp_url:
