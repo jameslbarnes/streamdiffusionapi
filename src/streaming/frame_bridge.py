@@ -309,11 +309,16 @@ class FFmpegWriter:
                 if frame.max() <= 1.0:
                     frame = (frame * 255).clip(0, 255)
                 frame = frame.astype(np.uint8)
+                # Convert RGB to BGR for correct color display
+                frame = frame[:, :, ::-1].copy()
             elif frame.dtype != np.uint8:
                 # Already numpy but wrong dtype
                 if frame.max() <= 1.0:
                     frame = (frame * 255).clip(0, 255)
                 frame = frame.astype(np.uint8)
+                # Convert RGB to BGR for correct color display
+                if len(frame.shape) == 3 and frame.shape[2] == 3:
+                    frame = frame[:, :, ::-1].copy()
 
             # Resize if needed
             if frame.shape[:2] != (self.height, self.width):
