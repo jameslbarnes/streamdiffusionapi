@@ -234,6 +234,7 @@ class FFmpegWriter:
             "-s", f"{self.width}x{self.height}",
             "-r", str(self.fps),
             "-i", "-",
+            "-pix_fmt", "yuv420p",  # Convert to YUV420P for FLV codec compatibility
             "-c:v", "flv",  # FLV1/Sorenson Spark - always available, works with RTMP
             "-q:v", "5",  # Quality level (1-31, lower is better)
             "-g", str(self.fps),  # Keyframe every second
