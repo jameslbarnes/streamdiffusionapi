@@ -25,7 +25,7 @@ load_env()
 RUNPOD_API_KEY = os.environ.get("RUNPOD_API_KEY")
 
 # Pinned versions
-PYTORCH_IMAGE = "runpod/pytorch:2.2.0-py3.10-cuda11.8.0-devel-ubuntu22.04"
+PYTORCH_IMAGE = "pytorch/pytorch:2.2.0-cuda11.8-cudnn8-devel"
 MEDIAMTX_VERSION = "v1.5.1"
 REPO_URL = "https://github.com/jameslbarnes/streamdiffusionapi.git"
 
