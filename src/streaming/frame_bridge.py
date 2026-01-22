@@ -226,21 +226,39 @@ class FFmpegWriter:
             return
 
         # FFmpeg command to encode and stream
-        # Use FLV1 codec which is universally available and works with RTMP
-        cmd = [
-            "ffmpeg",
-            "-f", "rawvideo",
-            "-pix_fmt", "rgb24",
-            "-s", f"{self.width}x{self.height}",
-            "-r", str(self.fps),
-            "-i", "-",
-            "-pix_fmt", "yuv420p",  # Convert to YUV420P for FLV codec compatibility
-            "-c:v", "flv",  # FLV1/Sorenson Spark - always available, works with RTMP
-            "-q:v", "5",  # Quality level (1-31, lower is better)
-            "-g", str(self.fps),  # Keyframe every second
-            "-f", self.output_format,
-            self.stream_url,
-        ]
+        # Use mpeg4 codec for RTSP, flv for RTMP
+        if self.output_format == "rtsp":
+            cmd = [
+                "ffmpeg",
+                "-f", "rawvideo",
+                "-pix_fmt", "rgb24",
+                "-s", f"{self.width}x{self.height}",
+                "-r", str(self.fps),
+                "-i", "-",
+                "-pix_fmt", "yuv420p",
+                "-c:v", "mpeg4",  # MPEG4 works with RTSP
+                "-q:v", "5",  # Quality level (1-31, lower is better)
+                "-g", str(self.fps),  # Keyframe every second
+                "-f", "rtsp",
+                "-rtsp_transport", "tcp",
+                self.stream_url,
+            ]
+        else:
+            # For RTMP, use FLV codec
+            cmd = [
+                "ffmpeg",
+                "-f", "rawvideo",
+                "-pix_fmt", "rgb24",
+                "-s", f"{self.width}x{self.height}",
+                "-r", str(self.fps),
+                "-i", "-",
+                "-pix_fmt", "yuv420p",
+                "-c:v", "flv",  # FLV1 for RTMP
+                "-q:v", "5",
+                "-g", str(self.fps),
+                "-f", self.output_format,
+                self.stream_url,
+            ]
 
         logger.info(f"Starting FFmpeg writer: {' '.join(cmd)}")
 
@@ -398,10 +416,9 @@ class FrameBridge:
             reader.start(self._input_buffers[stream_id])
 
             # Create writer for local output (MediaMTX)
-            # Use RTMP internally as it's more reliable than RTSP for publishing
-            rtmp_output_url = rtsp_output_url.replace("rtsp://", "rtmp://").replace(":8554/", ":1935/")
-            logger.info(f"Setting up output writer: {rtmp_output_url}")
-            writer = FFmpegWriter(rtmp_output_url, width, height)
+            # Use RTSP for publishing to MediaMTX (RTMP doesn't support mpeg4 codec)
+            logger.info(f"Setting up output writer: {rtsp_output_url}")
+            writer = FFmpegWriter(rtsp_output_url, width, height)
             self._writers[stream_id] = writer
             try:
                 writer.start()
