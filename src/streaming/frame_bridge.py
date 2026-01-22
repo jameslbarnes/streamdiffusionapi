@@ -85,10 +85,12 @@ class FFmpegReader:
 
     def _start_ffmpeg(self) -> subprocess.Popen | None:
         """Start the FFmpeg process with retry-friendly settings."""
+        # Use /usr/bin/ffmpeg which has full codec support (conda ffmpeg is limited)
+        ffmpeg_bin = "/usr/bin/ffmpeg"
+
         # FFmpeg command to read RTSP stream with reconnection support
-        # Note: -timeout flag causes issues with FFmpeg 4.x, use -stimeout instead
         cmd = [
-            "ffmpeg",
+            ffmpeg_bin,
             "-rtsp_transport", "tcp",  # Use TCP for reliability
             "-stimeout", "5000000",  # 5 second socket timeout in microseconds
             "-i", self.stream_url,
@@ -226,39 +228,30 @@ class FFmpegWriter:
             return
 
         # FFmpeg command to encode and stream
-        # Use mpeg4 codec for RTSP, flv for RTMP
+        # Use /usr/bin/ffmpeg which has libx264 (conda ffmpeg doesn't)
+        ffmpeg_bin = "/usr/bin/ffmpeg"
+
+        # Use H.264 with libx264 for WebRTC compatibility
+        cmd = [
+            ffmpeg_bin,
+            "-f", "rawvideo",
+            "-pix_fmt", "rgb24",
+            "-s", f"{self.width}x{self.height}",
+            "-r", str(self.fps),
+            "-i", "-",
+            "-pix_fmt", "yuv420p",
+            "-c:v", "libx264",  # H.264 for WebRTC compatibility
+            "-preset", "ultrafast",  # Fast encoding for real-time
+            "-tune", "zerolatency",  # Low latency streaming
+            "-g", str(self.fps),  # Keyframe every second
+            "-f", self.output_format,
+        ]
+
+        # Add RTSP-specific options
         if self.output_format == "rtsp":
-            cmd = [
-                "ffmpeg",
-                "-f", "rawvideo",
-                "-pix_fmt", "rgb24",
-                "-s", f"{self.width}x{self.height}",
-                "-r", str(self.fps),
-                "-i", "-",
-                "-pix_fmt", "yuv420p",
-                "-c:v", "mpeg4",  # MPEG4 works with RTSP
-                "-q:v", "5",  # Quality level (1-31, lower is better)
-                "-g", str(self.fps),  # Keyframe every second
-                "-f", "rtsp",
-                "-rtsp_transport", "tcp",
-                self.stream_url,
-            ]
-        else:
-            # For RTMP, use FLV codec
-            cmd = [
-                "ffmpeg",
-                "-f", "rawvideo",
-                "-pix_fmt", "rgb24",
-                "-s", f"{self.width}x{self.height}",
-                "-r", str(self.fps),
-                "-i", "-",
-                "-pix_fmt", "yuv420p",
-                "-c:v", "flv",  # FLV1 for RTMP
-                "-q:v", "5",
-                "-g", str(self.fps),
-                "-f", self.output_format,
-                self.stream_url,
-            ]
+            cmd.extend(["-rtsp_transport", "tcp"])
+
+        cmd.append(self.stream_url)
 
         logger.info(f"Starting FFmpeg writer: {' '.join(cmd)}")
 
