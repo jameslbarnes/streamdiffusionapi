@@ -226,8 +226,8 @@ class FFmpegWriter:
             return
 
         # FFmpeg command to encode and stream
-        # Use libopenh264 as it's more commonly available than libx264
-        # Fall back to h264 native encoder if needed
+        # Use NVIDIA hardware encoder (h264_nvenc) for best performance on GPU instances
+        # Falls back handled by trying different encoders
         cmd = [
             "ffmpeg",
             "-f", "rawvideo",
@@ -235,8 +235,12 @@ class FFmpegWriter:
             "-s", f"{self.width}x{self.height}",
             "-r", str(self.fps),
             "-i", "-",
-            "-c:v", "libopenh264",  # More widely available than libx264
-            "-allow_skip_frames", "1",  # Allow frame skipping for real-time
+            "-c:v", "h264_nvenc",  # NVIDIA hardware encoder - fast and reliable
+            "-preset", "p1",  # Fastest preset for low latency
+            "-tune", "ll",  # Low latency tuning
+            "-b:v", "4M",  # 4 Mbps bitrate
+            "-maxrate", "6M",
+            "-bufsize", "8M",
             "-g", str(self.fps),  # Keyframe every second
             "-f", self.output_format,
             self.stream_url,
@@ -258,20 +262,26 @@ class FFmpegWriter:
             logger.error(f"Failed to start FFmpeg writer: {e}")
             self._running = False
 
+    _write_frame_count: int = 0
+
     def write_frame(self, frame: np.ndarray) -> bool:
         """Write a frame to the stream."""
+        self._write_frame_count += 1
+
         if not self._running or not self._process:
-            logger.warning(f"Writer not running: running={self._running}, process={self._process is not None}")
+            if self._write_frame_count <= 3:
+                logger.warning(f"Writer not running: running={self._running}, process={self._process is not None}")
             return False
 
         # Check if process is still alive
-        if self._process.poll() is not None:
+        poll_result = self._process.poll()
+        if poll_result is not None:
             # Process has exited, try to get error output
             try:
                 _, stderr = self._process.communicate(timeout=1)
-                logger.error(f"FFmpeg writer crashed: {stderr.decode()[:500]}")
+                logger.error(f"FFmpeg writer crashed (exit code {poll_result}): {stderr.decode()[:500]}")
             except Exception:
-                logger.error("FFmpeg writer process exited unexpectedly")
+                logger.error(f"FFmpeg writer process exited unexpectedly (exit code {poll_result})")
             self._running = False
             return False
 
@@ -283,16 +293,25 @@ class FFmpegWriter:
             # Resize if needed
             if frame.shape[:2] != (self.height, self.width):
                 from PIL import Image
-
                 img = Image.fromarray(frame)
                 img = img.resize((self.width, self.height))
                 frame = np.array(img)
 
-            self._process.stdin.write(frame.tobytes())
+            frame_bytes = frame.tobytes()
+            if self._write_frame_count == 1:
+                logger.info(f"Writing first frame: shape={frame.shape}, bytes={len(frame_bytes)}, expected={self.width * self.height * 3}")
+
+            self._process.stdin.write(frame_bytes)
             self._process.stdin.flush()
+
+            if self._write_frame_count == 1:
+                logger.info(f"First frame written successfully to {self.stream_url}")
+
             return True
         except Exception as e:
-            logger.warning(f"Frame write error: {e}")
+            logger.warning(f"Frame write error (frame #{self._write_frame_count}): {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def stop(self) -> None:
