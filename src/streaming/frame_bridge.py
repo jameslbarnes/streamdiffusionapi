@@ -275,7 +275,9 @@ class FFmpegWriter:
             # Process has exited, try to get error output
             try:
                 _, stderr = self._process.communicate(timeout=1)
-                logger.error(f"FFmpeg writer crashed (exit code {poll_result}): {stderr.decode()[:500]}")
+                stderr_text = stderr.decode(errors='replace')
+                # Log the last 1000 chars where the actual error usually is
+                logger.error(f"FFmpeg writer crashed (exit code {poll_result}). Last 1000 chars of stderr: {stderr_text[-1000:]}")
             except Exception:
                 logger.error(f"FFmpeg writer process exited unexpectedly (exit code {poll_result})")
             self._running = False
