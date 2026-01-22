@@ -400,15 +400,28 @@ class FrameBridge:
             return None
         return await buffer.get_async(timeout=0.1)
 
+    _frame_log_counter: dict[str, int] = {}
+
     async def send_output_frame(self, stream_id: str, frame: np.ndarray) -> None:
         """Send an output frame for a stream.
 
         Writes to local MediaMTX output and optional external RTMP destination.
         """
+        # Log first frame and periodically
+        count = self._frame_log_counter.get(stream_id, 0)
+        if count == 0:
+            logger.info(f"First output frame for {stream_id}: shape={frame.shape}, dtype={frame.dtype}")
+        self._frame_log_counter[stream_id] = count + 1
+
         # Write to local RTSP output (MediaMTX)
         writer = self._writers.get(stream_id)
         if writer:
-            writer.write_frame(frame)
+            success = writer.write_frame(frame)
+            if count == 0:
+                logger.info(f"First frame write result for {stream_id}: {success}")
+        else:
+            if count == 0:
+                logger.warning(f"No writer found for stream {stream_id}")
 
         # Write to external RTMP output if configured
         rtmp_writer = self._rtmp_writers.get(stream_id)
