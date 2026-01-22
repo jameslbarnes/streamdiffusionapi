@@ -13,7 +13,18 @@ import torch
 if not hasattr(torch, 'xpu'):
     class _FakeXPU:
         """Fake XPU module for compatibility."""
-        is_available = staticmethod(lambda: False)
+        @staticmethod
+        def is_available():
+            return False
+        @staticmethod
+        def empty_cache():
+            pass
+        @staticmethod
+        def synchronize():
+            pass
+        @staticmethod
+        def device_count():
+            return 0
     torch.xpu = _FakeXPU()
 
 logger = logging.getLogger(__name__)
