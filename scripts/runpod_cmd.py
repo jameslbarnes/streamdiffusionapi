@@ -143,7 +143,7 @@ echo '=== Installing MediaMTX ==='
 curl -sL https://github.com/bluenviron/mediamtx/releases/download/{MEDIAMTX_VERSION}/mediamtx_{MEDIAMTX_VERSION}_linux_amd64.tar.gz | tar xz -C /usr/local/bin
 
 echo '=== Cloning StreamDiffusion API ==='
-cd /workspace
+cd /root
 git clone {REPO_URL} streamdiffusionapi || (cd streamdiffusionapi && git pull)
 cd streamdiffusionapi
 
@@ -179,8 +179,8 @@ python -m src.api.app
             gpuTypeIdList: ["{gpu_id}"],
             gpuCount: 1,
             cloudType: SECURE,
-            volumeInGb: 50,
-            containerDiskInGb: 50,
+            volumeInGb: 0,
+            containerDiskInGb: 100,
             minMemoryInGb: 64,
             name: "streamdiffusion-api",
             ports: "8080/http,8889/http,8890/http,8888/http,1935/tcp",
