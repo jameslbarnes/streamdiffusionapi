@@ -25,9 +25,13 @@ load_env()
 RUNPOD_API_KEY = os.environ.get("RUNPOD_API_KEY")
 
 # Pinned versions
-PYTORCH_IMAGE = "pytorch/pytorch:2.2.0-cuda11.8-cudnn8-devel"
+DEFAULT_IMAGE = "pytorch/pytorch:2.2.0-cuda11.8-cudnn8-devel"
 MEDIAMTX_VERSION = "v1.5.1"
 REPO_URL = "https://github.com/jameslbarnes/streamdiffusionapi.git"
+
+# Set STREAMDIFFUSION_IMAGE env var to use a pre-built image
+# e.g., export STREAMDIFFUSION_IMAGE=yourusername/streamdiffusion-api:latest
+CUSTOM_IMAGE = os.environ.get("STREAMDIFFUSION_IMAGE")
 
 
 def graphql(query):
@@ -124,17 +128,30 @@ def stop_pod(pod_id):
     return True
 
 
-def deploy_pod(gpu_id="NVIDIA H100 PCIe", resolution="1024x576"):
-    """Deploy a new StreamDiffusion API pod"""
+def deploy_pod(gpu_id="NVIDIA H100 PCIe", resolution="1024x576", image=None):
+    """Deploy a new StreamDiffusion API pod
+
+    Args:
+        gpu_id: GPU type to use
+        resolution: Default resolution (WxH)
+        image: Docker image to use (defaults to CUSTOM_IMAGE or DEFAULT_IMAGE)
+    """
 
     width, height = resolution.split('x')
 
-    # Startup script that:
-    # 1. Installs ffmpeg and MediaMTX
-    # 2. Clones the repo
-    # 3. Installs dependencies
-    # 4. Starts the API
-    startup_script = f'''bash -c "
+    # Determine which image to use
+    use_image = image or CUSTOM_IMAGE or DEFAULT_IMAGE
+    is_prebuilt = use_image != DEFAULT_IMAGE
+
+    if is_prebuilt:
+        # Pre-built image - just run the entrypoint
+        startup_script = '''bash -c "
+echo '=== Starting StreamDiffusion API (pre-built image) ==='
+/docker-entrypoint.sh
+"'''
+    else:
+        # Default image - full installation
+        startup_script = f'''bash -c "
 set -e
 echo '=== Installing system dependencies ==='
 apt-get update -qq && apt-get install -qq -y ffmpeg git curl > /dev/null 2>&1
@@ -175,7 +192,7 @@ python -m src.api.app
 
     query = f'''mutation {{
         podFindAndDeployOnDemand(input: {{
-            imageName: "{PYTORCH_IMAGE}",
+            imageName: "{use_image}",
             gpuTypeIdList: ["{gpu_id}"],
             gpuCount: 1,
             cloudType: SECURE,
@@ -197,7 +214,9 @@ python -m src.api.app
     print(f"Deploying StreamDiffusion API pod...")
     print(f"  GPU: {gpu_id}")
     print(f"  Resolution: {resolution}")
-    print(f"  Image: {PYTORCH_IMAGE}")
+    print(f"  Image: {use_image}")
+    if is_prebuilt:
+        print(f"  Mode: Pre-built (fast startup)")
     print()
 
     result = graphql(query)
@@ -267,17 +286,21 @@ def main():
         print("StreamDiffusion API - RunPod Management")
         print()
         print("Usage:")
-        print("  python runpod_cmd.py gpus                      - List available GPUs")
-        print("  python runpod_cmd.py pods                      - List running pods")
-        print("  python runpod_cmd.py deploy [gpu] [WxH]        - Deploy new pod")
-        print("  python runpod_cmd.py stop <pod_id>             - Stop pod")
-        print("  python runpod_cmd.py terminate <pod_id>        - Terminate pod")
-        print("  python runpod_cmd.py rtmp <pod_id>             - Get RTMP URL")
+        print("  python runpod_cmd.py gpus                        - List available GPUs")
+        print("  python runpod_cmd.py pods                        - List running pods")
+        print("  python runpod_cmd.py deploy [gpu] [WxH] [image]  - Deploy new pod")
+        print("  python runpod_cmd.py stop <pod_id>               - Stop pod")
+        print("  python runpod_cmd.py terminate <pod_id>          - Terminate pod")
+        print("  python runpod_cmd.py rtmp <pod_id>               - Get RTMP URL")
         print()
         print("Examples:")
         print("  python runpod_cmd.py deploy")
         print("  python runpod_cmd.py deploy 'NVIDIA H100 PCIe' 1024x576")
         print("  python runpod_cmd.py deploy 'NVIDIA H100 NVL' 1024x1024")
+        print()
+        print("Pre-built image (fast startup):")
+        print("  python runpod_cmd.py deploy 'NVIDIA H100 PCIe' 1024x576 user/streamdiffusion-api:latest")
+        print("  # Or set STREAMDIFFUSION_IMAGE environment variable")
         print()
         print("Requires RUNPOD_API_KEY in .env file or environment")
         sys.exit(1)
@@ -291,7 +314,8 @@ def main():
     elif cmd == "deploy":
         gpu = sys.argv[2] if len(sys.argv) > 2 else "NVIDIA H100 PCIe"
         resolution = sys.argv[3] if len(sys.argv) > 3 else "1024x576"
-        deploy_pod(gpu, resolution)
+        image = sys.argv[4] if len(sys.argv) > 4 else None
+        deploy_pod(gpu, resolution, image)
     elif cmd == "stop":
         if len(sys.argv) < 3:
             print("Usage: python runpod_cmd.py stop <pod_id>")
