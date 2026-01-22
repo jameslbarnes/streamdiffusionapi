@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -11,6 +12,24 @@ from typing import Any
 from ..api.models.responses import StreamResponse, StreamStatusResponse, StreamStatus
 
 logger = logging.getLogger(__name__)
+
+def _get_external_host() -> tuple[str, str, bool]:
+    """Detect external hostname for URLs.
+
+    Returns (base_host, pod_id, is_runpod)
+    """
+    # Check for RunPod environment
+    pod_id = os.environ.get("RUNPOD_POD_ID")
+    if pod_id:
+        return f"{pod_id}", pod_id, True
+
+    # Check for explicit override
+    external_host = os.environ.get("EXTERNAL_HOST")
+    if external_host:
+        return external_host, "", False
+
+    # Default to localhost
+    return "localhost", "", False
 
 
 @dataclass
@@ -49,10 +68,24 @@ class StreamManager:
     def __init__(self):
         self._streams: dict[str, StreamState] = {}
         self._lock = asyncio.Lock()
-        self._host = "localhost"
-        self._port = 8080
-        self._mediamtx_port = 8889  # WHIP port
-        self._mediamtx_whep_port = 8890  # WHEP port
+
+        # Detect external host for URL generation
+        base_host, pod_id, is_runpod = _get_external_host()
+        self._is_runpod = is_runpod
+        self._pod_id = pod_id
+
+        if is_runpod:
+            # RunPod proxy URLs
+            self._api_url = f"https://{pod_id}-8080.proxy.runpod.net"
+            self._whip_url = f"https://{pod_id}-8889.proxy.runpod.net"
+            self._whep_url = f"https://{pod_id}-8889.proxy.runpod.net"  # Same port, different path
+            self._hls_url = f"https://{pod_id}-8888.proxy.runpod.net"
+        else:
+            # Local development
+            self._api_url = f"http://{base_host}:8080"
+            self._whip_url = f"http://{base_host}:8889"
+            self._whep_url = f"http://{base_host}:8889"
+            self._hls_url = f"http://{base_host}:8888"
 
     @classmethod
     def get_instance(cls) -> "StreamManager":
@@ -83,12 +116,12 @@ class StreamManager:
             stream_key=state.stream_key,
             created_at=state.created_at,
             status=state.status,
-            whip_url=f"http://{self._host}:{self._mediamtx_port}/{state.id}/whip",
+            whip_url=f"{self._whip_url}/{state.id}/whip",
             output_playback_id=playback_id,
-            output_stream_url=f"http://{self._host}:{self._mediamtx_whep_port}/{state.id}_out/whep",
-            output_hls_url=f"http://{self._host}:8888/{state.id}_out/index.m3u8",
+            output_stream_url=f"{self._whep_url}/{state.id}_out/whep",
+            output_hls_url=f"{self._hls_url}/{state.id}_out/index.m3u8",
             output_rtmp_url=state.output_rtmp_url,
-            gateway_host=f"{self._host}:{self._port}",
+            gateway_host=self._api_url,
             pipeline=state.pipeline_type,
             params=state.params,
         )
