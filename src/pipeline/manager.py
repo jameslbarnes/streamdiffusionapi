@@ -198,8 +198,11 @@ class StreamManager:
                 height=height,
                 rtsp_input_url=rtsp_input_url,
                 rtsp_output_url=rtsp_output_url,
+                output_rtmp_url=state.output_rtmp_url,
             )
             logger.info(f"Frame bridge setup for stream {stream_id}")
+            if state.output_rtmp_url:
+                logger.info(f"RTMP output enabled: {state.output_rtmp_url}")
 
             state.status = StreamStatus.RUNNING
             state.started_at = datetime.now(timezone.utc)

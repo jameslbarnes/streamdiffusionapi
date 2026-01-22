@@ -186,6 +186,7 @@ class FFmpegWriter:
         fps: int = 30,
         codec: str = "h264",
         preset: str = "medium",
+        output_format: str | None = None,
     ):
         self.stream_url = stream_url
         self.width = width
@@ -195,6 +196,14 @@ class FFmpegWriter:
         self.preset = preset
         self._process: subprocess.Popen | None = None
         self._running = False
+
+        # Auto-detect format from URL if not specified
+        if output_format:
+            self.output_format = output_format
+        elif stream_url.startswith("rtmp://"):
+            self.output_format = "flv"
+        else:
+            self.output_format = "rtsp"
 
     def start(self) -> None:
         """Start the FFmpeg writer process."""
@@ -215,7 +224,7 @@ class FFmpegWriter:
             "-profile:v", "high",
             "-bf", "0",  # No B-frames for lower latency
             "-g", str(self.fps),  # Keyframe every second
-            "-f", "rtsp",
+            "-f", self.output_format,
             self.stream_url,
         ]
 
@@ -227,6 +236,7 @@ class FFmpegWriter:
             bufsize=self.width * self.height * 3 * 2,
         )
         self._running = True
+        logger.info(f"FFmpeg writer started: {self.stream_url} (format: {self.output_format})")
 
     def write_frame(self, frame: np.ndarray) -> bool:
         """Write a frame to the stream."""
@@ -280,6 +290,7 @@ class FrameBridge:
         self._output_buffers: dict[str, FrameBuffer] = {}
         self._readers: dict[str, FFmpegReader] = {}
         self._writers: dict[str, FFmpegWriter] = {}
+        self._rtmp_writers: dict[str, FFmpegWriter] = {}  # External RTMP outputs
         self._lock = asyncio.Lock()
 
     @classmethod
@@ -296,8 +307,18 @@ class FrameBridge:
         height: int,
         rtsp_input_url: str,
         rtsp_output_url: str,
+        output_rtmp_url: str | None = None,
     ) -> None:
-        """Setup input/output for a stream."""
+        """Setup input/output for a stream.
+
+        Args:
+            stream_id: Unique stream identifier
+            width: Frame width
+            height: Frame height
+            rtsp_input_url: Local RTSP URL to read input from (from MediaMTX)
+            rtsp_output_url: Local RTSP URL to write output to (to MediaMTX)
+            output_rtmp_url: Optional external RTMP URL to push output to
+        """
         async with self._lock:
             # Create buffers
             self._input_buffers[stream_id] = FrameBuffer()
@@ -308,10 +329,17 @@ class FrameBridge:
             self._readers[stream_id] = reader
             reader.start(self._input_buffers[stream_id])
 
-            # Create writer for output
+            # Create writer for local output (MediaMTX)
             writer = FFmpegWriter(rtsp_output_url, width, height)
             self._writers[stream_id] = writer
             writer.start()
+
+            # Create writer for external RTMP output if specified
+            if output_rtmp_url:
+                rtmp_writer = FFmpegWriter(output_rtmp_url, width, height)
+                self._rtmp_writers[stream_id] = rtmp_writer
+                rtmp_writer.start()
+                logger.info(f"RTMP output enabled for stream {stream_id}: {output_rtmp_url}")
 
             logger.info(f"Frame bridge setup for stream {stream_id}")
 
@@ -323,10 +351,19 @@ class FrameBridge:
         return await buffer.get_async(timeout=0.1)
 
     async def send_output_frame(self, stream_id: str, frame: np.ndarray) -> None:
-        """Send an output frame for a stream."""
+        """Send an output frame for a stream.
+
+        Writes to local MediaMTX output and optional external RTMP destination.
+        """
+        # Write to local RTSP output (MediaMTX)
         writer = self._writers.get(stream_id)
         if writer:
             writer.write_frame(frame)
+
+        # Write to external RTMP output if configured
+        rtmp_writer = self._rtmp_writers.get(stream_id)
+        if rtmp_writer:
+            rtmp_writer.write_frame(frame)
 
     async def teardown_stream(self, stream_id: str) -> None:
         """Teardown input/output for a stream."""
@@ -336,10 +373,16 @@ class FrameBridge:
             if reader:
                 reader.stop()
 
-            # Stop writer
+            # Stop local RTSP writer
             writer = self._writers.pop(stream_id, None)
             if writer:
                 writer.stop()
+
+            # Stop external RTMP writer
+            rtmp_writer = self._rtmp_writers.pop(stream_id, None)
+            if rtmp_writer:
+                rtmp_writer.stop()
+                logger.info(f"RTMP output stopped for stream {stream_id}")
 
             # Clear buffers
             self._input_buffers.pop(stream_id, None)
