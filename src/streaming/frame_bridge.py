@@ -79,10 +79,11 @@ class FFmpegReader:
     def _start_ffmpeg(self) -> subprocess.Popen | None:
         """Start the FFmpeg process with retry-friendly settings."""
         # FFmpeg command to read RTSP stream with reconnection support
+        # Note: -timeout flag causes issues with FFmpeg 4.x, use -stimeout instead
         cmd = [
             "ffmpeg",
             "-rtsp_transport", "tcp",  # Use TCP for reliability
-            "-timeout", "5000000",  # 5 second timeout in microseconds
+            "-stimeout", "5000000",  # 5 second socket timeout in microseconds
             "-i", self.stream_url,
             "-f", "rawvideo",
             "-pix_fmt", "rgb24",
