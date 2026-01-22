@@ -226,8 +226,7 @@ class FFmpegWriter:
             return
 
         # FFmpeg command to encode and stream
-        # Use NVIDIA hardware encoder (h264_nvenc) for best performance on GPU instances
-        # Falls back handled by trying different encoders
+        # Use FLV1 codec which is universally available and works with RTMP
         cmd = [
             "ffmpeg",
             "-f", "rawvideo",
@@ -235,12 +234,8 @@ class FFmpegWriter:
             "-s", f"{self.width}x{self.height}",
             "-r", str(self.fps),
             "-i", "-",
-            "-c:v", "h264_nvenc",  # NVIDIA hardware encoder - fast and reliable
-            "-preset", "p1",  # Fastest preset for low latency
-            "-tune", "ll",  # Low latency tuning
-            "-b:v", "4M",  # 4 Mbps bitrate
-            "-maxrate", "6M",
-            "-bufsize", "8M",
+            "-c:v", "flv",  # FLV1/Sorenson Spark - always available, works with RTMP
+            "-q:v", "5",  # Quality level (1-31, lower is better)
             "-g", str(self.fps),  # Keyframe every second
             "-f", self.output_format,
             self.stream_url,
