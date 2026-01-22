@@ -281,8 +281,24 @@ class FFmpegWriter:
             return False
 
         try:
-            # Ensure frame is the right format
-            if frame.dtype != np.uint8:
+            # Handle PyTorch tensors - convert to numpy array
+            if hasattr(frame, 'cpu'):  # It's a torch tensor
+                import torch
+                # Frame is NCHW format: (batch, channels, height, width)
+                # Convert to HWC format: (height, width, channels)
+                if frame.dim() == 4:
+                    frame = frame[0]  # Remove batch dimension -> (C, H, W)
+                if frame.dim() == 3 and frame.shape[0] in (1, 3, 4):
+                    frame = frame.permute(1, 2, 0)  # CHW -> HWC
+                # Convert to numpy and scale to 0-255
+                frame = frame.cpu().float().numpy()
+                if frame.max() <= 1.0:
+                    frame = (frame * 255).clip(0, 255)
+                frame = frame.astype(np.uint8)
+            elif frame.dtype != np.uint8:
+                # Already numpy but wrong dtype
+                if frame.max() <= 1.0:
+                    frame = (frame * 255).clip(0, 255)
                 frame = frame.astype(np.uint8)
 
             # Resize if needed
