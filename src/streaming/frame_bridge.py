@@ -226,6 +226,7 @@ class FFmpegWriter:
             return
 
         # FFmpeg command to encode and stream
+        # Use RTSP TCP transport for reliability with MediaMTX
         cmd = [
             "ffmpeg",
             "-f", "rawvideo",
@@ -239,23 +240,42 @@ class FFmpegWriter:
             "-profile:v", "high",
             "-bf", "0",  # No B-frames for lower latency
             "-g", str(self.fps),  # Keyframe every second
+            "-rtsp_transport", "tcp",  # Use TCP for RTSP output
             "-f", self.output_format,
             self.stream_url,
         ]
 
-        self._process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            bufsize=self.width * self.height * 3 * 2,
-        )
-        self._running = True
-        logger.info(f"FFmpeg writer started: {self.stream_url} (format: {self.output_format})")
+        logger.info(f"Starting FFmpeg writer: {' '.join(cmd)}")
+
+        try:
+            self._process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=self.width * self.height * 3 * 2,
+            )
+            self._running = True
+            logger.info(f"FFmpeg writer started: {self.stream_url} (format: {self.output_format})")
+        except Exception as e:
+            logger.error(f"Failed to start FFmpeg writer: {e}")
+            self._running = False
 
     def write_frame(self, frame: np.ndarray) -> bool:
         """Write a frame to the stream."""
         if not self._running or not self._process:
+            logger.warning(f"Writer not running: running={self._running}, process={self._process is not None}")
+            return False
+
+        # Check if process is still alive
+        if self._process.poll() is not None:
+            # Process has exited, try to get error output
+            try:
+                _, stderr = self._process.communicate(timeout=1)
+                logger.error(f"FFmpeg writer crashed: {stderr.decode()[:500]}")
+            except Exception:
+                logger.error("FFmpeg writer process exited unexpectedly")
+            self._running = False
             return False
 
         try:
