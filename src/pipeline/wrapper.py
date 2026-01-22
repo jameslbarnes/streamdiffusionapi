@@ -7,6 +7,15 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
+# Monkey-patch torch.xpu for older PyTorch versions that don't have it
+# StreamDiffusion checks for this attribute
+import torch
+if not hasattr(torch, 'xpu'):
+    class _FakeXPU:
+        """Fake XPU module for compatibility."""
+        is_available = staticmethod(lambda: False)
+    torch.xpu = _FakeXPU()
+
 logger = logging.getLogger(__name__)
 
 
