@@ -12,19 +12,41 @@ from PIL import Image
 import torch
 if not hasattr(torch, 'xpu'):
     class _FakeXPU:
-        """Fake XPU module for compatibility."""
+        """Fake XPU module for compatibility - returns False/no-op for all methods."""
         @staticmethod
-        def is_available():
-            return False
+        def is_available(): return False
         @staticmethod
-        def empty_cache():
-            pass
+        def is_initialized(): return False
         @staticmethod
-        def synchronize():
-            pass
+        def device_count(): return 0
         @staticmethod
-        def device_count():
-            return 0
+        def current_device(): return None
+        @staticmethod
+        def empty_cache(): pass
+        @staticmethod
+        def synchronize(device=None): pass
+        @staticmethod
+        def manual_seed(seed): pass
+        @staticmethod
+        def manual_seed_all(seed): pass
+        @staticmethod
+        def seed(): return 0
+        @staticmethod
+        def initial_seed(): return 0
+        @staticmethod
+        def set_device(device): pass
+        @staticmethod
+        def get_device_name(device=None): return ""
+        @staticmethod
+        def get_device_properties(device=None): return None
+        @staticmethod
+        def memory_allocated(device=None): return 0
+        @staticmethod
+        def max_memory_allocated(device=None): return 0
+        @staticmethod
+        def reset_peak_memory_stats(device=None): pass
+        @staticmethod
+        def mem_get_info(device=None): return (0, 0)
     torch.xpu = _FakeXPU()
 
 logger = logging.getLogger(__name__)
