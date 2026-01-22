@@ -21,7 +21,7 @@ build/
 
 # Project specific
 engines/
-models/
+/models/
 *.engine
 mediamtx.yml
 mediamtx.exe
