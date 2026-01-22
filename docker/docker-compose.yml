@@ -1,0 +1,52 @@
+version: "3.8"
+
+services:
+  streamdiffusion-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8080:8080"   # API
+      - "8554:8554"   # RTSP
+      - "1935:1935"   # RTMP
+      - "8888:8888"   # HLS
+      - "8889:8889"   # WHIP (WebRTC input)
+      - "8890:8890"   # WHEP (WebRTC output)
+      - "9997:9997"   # MediaMTX API
+    volumes:
+      # Persist TensorRT engines (compilation is slow)
+      - ./engines:/app/engines
+      # Persist downloaded models
+      - ./models:/app/models
+      # Mount HuggingFace cache
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HF_HOME=/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # Optional: Standalone MediaMTX for debugging
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    ports:
+      - "18554:8554"   # RTSP (offset to avoid conflict)
+      - "11935:1935"   # RTMP
+      - "18888:8888"   # HLS
+      - "18889:8889"   # WHIP
+      - "18890:8890"   # WHEP
+      - "19997:9997"   # API
+    profiles:
+      - debug  # Only start with: docker-compose --profile debug up

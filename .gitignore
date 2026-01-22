@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+*.egg-info/
+dist/
+build/
+*.egg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Project specific
+engines/
+models/
+*.engine
+mediamtx.yml
+mediamtx.exe
+mediamtx
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+config.yaml
+
+# HuggingFace cache (large)
+.cache/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db

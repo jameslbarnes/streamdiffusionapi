@@ -1,0 +1,45 @@
+# StreamDiffusion API Configuration
+# Copy to config.yaml and modify as needed
+
+# Server settings
+server:
+  host: "0.0.0.0"
+  port: 8080
+  workers: 1
+
+# MediaMTX settings
+mediamtx:
+  enabled: true
+  binary_path: null  # Auto-detect if null
+  api_port: 9997
+  rtsp_port: 8554
+  rtmp_port: 1935
+  hls_port: 8888
+  webrtc_port: 8889
+
+# GPU settings
+gpu:
+  device: 0
+  enable_tensorrt: true
+  tensorrt_cache_dir: "engines"
+  memory_fraction: 0.9  # Max GPU memory fraction to use
+
+# Pipeline defaults
+pipeline:
+  default_model: "stabilityai/sdxl-turbo"
+  default_width: 768
+  default_height: 448
+  default_steps: 50
+  default_t_index_list: [11]
+  warmup_iterations: 3
+  use_tiny_vae: true
+
+# Model cache
+models:
+  cache_dir: "models"
+  preload: []  # List of model IDs to preload at startup
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

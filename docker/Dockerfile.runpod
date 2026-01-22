@@ -1,0 +1,68 @@
+# StreamDiffusion API Dockerfile for RunPod
+# Optimized for RunPod's infrastructure
+
+FROM runpod/pytorch:2.2.0-py3.10-cuda11.8.0-devel-ubuntu22.04
+
+# Prevent timezone prompts
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+# Environment variables for RunPod
+ENV PYTHONUNBUFFERED=1
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    wget \
+    curl \
+    ffmpeg \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install MediaMTX
+ARG MEDIAMTX_VERSION=1.5.1
+RUN wget -q https://github.com/bluenviron/mediamtx/releases/download/v${MEDIAMTX_VERSION}/mediamtx_v${MEDIAMTX_VERSION}_linux_amd64.tar.gz \
+    && tar -xzf mediamtx_v${MEDIAMTX_VERSION}_linux_amd64.tar.gz \
+    && mv mediamtx /usr/local/bin/ \
+    && rm -f mediamtx_v${MEDIAMTX_VERSION}_linux_amd64.tar.gz mediamtx.yml
+
+# Set working directory
+WORKDIR /app
+
+# Install StreamDiffusion with all extras
+RUN pip install --no-cache-dir \
+    "git+https://github.com/daydreamlive/StreamDiffusion.git@main#egg=streamdiffusion[tensorrt,controlnet,ipadapter]"
+
+# Install TensorRT tools
+RUN python -m streamdiffusion.tools.install-tensorrt || echo "TensorRT install warning (may be ok)"
+
+# Copy requirements and install
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Create directories for models and TensorRT engines
+# These should be mounted to network storage on RunPod for persistence
+RUN mkdir -p /app/engines /app/models /runpod-volume
+
+# Create symlinks to network volume if it exists
+RUN ln -sf /runpod-volume/engines /app/engines_cache 2>/dev/null || true \
+    && ln -sf /runpod-volume/models /app/models_cache 2>/dev/null || true
+
+# Expose ports
+EXPOSE 8080 8554 1935 8888 8889 8890 9997
+
+# RunPod handler script
+COPY docker/runpod_handler.py /app/runpod_handler.py
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# Default command - can be overridden
+CMD ["python", "-m", "src.api.app"]
