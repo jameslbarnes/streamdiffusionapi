@@ -227,12 +227,23 @@ class StreamManager:
         logger.info(f"Processing loop started for stream {stream_id}")
 
         try:
+            wait_count = 0
             while state.status == StreamStatus.RUNNING:
                 # Get frame from MediaMTX input
                 frame = await self._get_input_frame(stream_id)
                 if frame is None:
+                    wait_count += 1
+                    if wait_count == 100:  # Log after ~1 second of waiting
+                        logger.debug(f"Waiting for input frames for stream {stream_id}...")
+                    elif wait_count % 1000 == 0:  # Log every ~10 seconds
+                        logger.warning(f"Still waiting for input frames for stream {stream_id} (waited {wait_count * 0.01:.1f}s)")
                     await asyncio.sleep(0.01)  # No frame available, short sleep
                     continue
+
+                # Reset wait count when we get a frame
+                if wait_count > 0:
+                    logger.info(f"First frame received for stream {stream_id} after {wait_count * 0.01:.1f}s wait")
+                    wait_count = 0
 
                 # Process through StreamDiffusion
                 start_time = time.perf_counter()
@@ -249,6 +260,12 @@ class StreamManager:
                 if state.last_frame_time > 0:
                     state.fps = 1.0 / (now - state.last_frame_time)
                 state.last_frame_time = now
+
+                # Log first frame and periodically after
+                if state.frames_processed == 1:
+                    logger.info(f"First frame processed for stream {stream_id} (latency: {state.latency_ms:.1f}ms)")
+                elif state.frames_processed % 300 == 0:  # Every ~10 seconds at 30fps
+                    logger.info(f"Processed {state.frames_processed} frames for stream {stream_id} (fps: {state.fps:.1f}, latency: {state.latency_ms:.1f}ms)")
 
         except asyncio.CancelledError:
             logger.info(f"Processing loop cancelled for stream {stream_id}")

@@ -15,21 +15,28 @@ logger = logging.getLogger(__name__)
 class FrameBuffer:
     """Thread-safe frame buffer for a single stream."""
 
-    def __init__(self, max_size: int = 30):
+    def __init__(self, max_size: int = 30, loop: asyncio.AbstractEventLoop | None = None):
         self._buffer: deque[np.ndarray] = deque(maxlen=max_size)
         self._lock = threading.Lock()
         self._event = asyncio.Event()
+        # Store the event loop reference for cross-thread signaling
+        self._loop = loop
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Set the event loop for cross-thread signaling."""
+        self._loop = loop
 
     def put(self, frame: np.ndarray) -> None:
         """Add a frame to the buffer."""
         with self._lock:
             self._buffer.append(frame)
         # Signal that a frame is available (asyncio event)
-        try:
-            loop = asyncio.get_event_loop()
-            loop.call_soon_threadsafe(self._event.set)
-        except RuntimeError:
-            pass
+        if self._loop is not None:
+            try:
+                self._loop.call_soon_threadsafe(self._event.set)
+            except RuntimeError:
+                # Loop may be closed
+                pass
 
     def get(self) -> np.ndarray | None:
         """Get the latest frame (non-blocking)."""
@@ -127,6 +134,7 @@ class FFmpegReader:
             consecutive_failures = 0
 
             # Read frames until connection drops
+            frames_read = 0
             while self._running and self._process and self._process.poll() is None:
                 try:
                     raw_frame = self._process.stdout.read(frame_size)
@@ -136,8 +144,14 @@ class FFmpegReader:
                         )
                         if self._buffer:
                             self._buffer.put(frame)
+                            frames_read += 1
+                            if frames_read == 1:
+                                logger.info(f"First frame read from {self.stream_url}")
+                            elif frames_read % 300 == 0:  # Log every ~10 seconds at 30fps
+                                logger.info(f"Read {frames_read} frames from {self.stream_url}")
                     elif len(raw_frame) == 0:
                         # Stream ended
+                        logger.warning(f"Stream ended (0 bytes read) from {self.stream_url}")
                         break
                 except Exception as e:
                     logger.warning(f"Frame read error: {e}")
@@ -321,9 +335,12 @@ class FrameBridge:
             output_rtmp_url: Optional external RTMP URL to push output to
         """
         async with self._lock:
-            # Create buffers
-            self._input_buffers[stream_id] = FrameBuffer()
-            self._output_buffers[stream_id] = FrameBuffer()
+            # Get the current event loop for cross-thread signaling
+            loop = asyncio.get_running_loop()
+
+            # Create buffers with loop reference for thread-safe signaling
+            self._input_buffers[stream_id] = FrameBuffer(loop=loop)
+            self._output_buffers[stream_id] = FrameBuffer(loop=loop)
 
             # Create reader for input
             reader = FFmpegReader(rtsp_input_url, width, height)
