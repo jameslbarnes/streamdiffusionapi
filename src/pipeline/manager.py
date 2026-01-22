@@ -170,6 +170,7 @@ class StreamManager:
 
             # Import here to avoid circular imports and delay GPU init
             from .wrapper import StreamDiffusionWrapper
+            from ..streaming.frame_bridge import FrameBridge
 
             # Create pipeline wrapper
             wrapper = StreamDiffusionWrapper(
@@ -181,6 +182,25 @@ class StreamManager:
             await wrapper.initialize()
 
             state.pipeline = wrapper
+
+            # Set up frame bridge for this stream
+            width = state.params.get("width", 1024)
+            height = state.params.get("height", 576)
+
+            # MediaMTX URLs - WHIP publishes to /{stream_id}, we read via RTSP
+            rtsp_input_url = f"rtsp://localhost:8554/{stream_id}"
+            rtsp_output_url = f"rtsp://localhost:8554/{stream_id}_out"
+
+            bridge = FrameBridge.get_instance()
+            await bridge.setup_stream(
+                stream_id=stream_id,
+                width=width,
+                height=height,
+                rtsp_input_url=rtsp_input_url,
+                rtsp_output_url=rtsp_output_url,
+            )
+            logger.info(f"Frame bridge setup for stream {stream_id}")
+
             state.status = StreamStatus.RUNNING
             state.started_at = datetime.now(timezone.utc)
             logger.info(f"Pipeline started for stream {stream_id}")
@@ -192,6 +212,8 @@ class StreamManager:
             logger.error(f"Failed to start pipeline for {stream_id}: {e}")
             state.status = StreamStatus.ERROR
             state.error_message = str(e)
+            import traceback
+            traceback.print_exc()
 
     async def _process_stream(self, stream_id: str) -> None:
         """Main processing loop for a stream."""
@@ -401,6 +423,11 @@ class StreamManager:
                     await state.processing_task
                 except asyncio.CancelledError:
                     pass
+
+            # Teardown frame bridge
+            from ..streaming.frame_bridge import FrameBridge
+            bridge = FrameBridge.get_instance()
+            await bridge.teardown_stream(stream_id)
 
             # Cleanup pipeline
             if state.pipeline:

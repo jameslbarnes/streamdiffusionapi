@@ -73,9 +73,16 @@ class FFmpegReader:
         self._buffer = buffer
         self._running = True
 
-        # FFmpeg command to read stream and output raw frames
+        self._thread = threading.Thread(target=self._read_loop, daemon=True)
+        self._thread.start()
+
+    def _start_ffmpeg(self) -> subprocess.Popen | None:
+        """Start the FFmpeg process with retry-friendly settings."""
+        # FFmpeg command to read RTSP stream with reconnection support
         cmd = [
             "ffmpeg",
+            "-rtsp_transport", "tcp",  # Use TCP for reliability
+            "-timeout", "5000000",  # 5 second timeout in microseconds
             "-i", self.stream_url,
             "-f", "rawvideo",
             "-pix_fmt", "rgb24",
@@ -85,32 +92,71 @@ class FFmpegReader:
             "-",
         ]
 
-        self._process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            bufsize=self.width * self.height * 3 * 2,  # Buffer 2 frames
-        )
-
-        self._thread = threading.Thread(target=self._read_loop, daemon=True)
-        self._thread.start()
+        try:
+            return subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=self.width * self.height * 3 * 2,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to start FFmpeg reader: {e}")
+            return None
 
     def _read_loop(self) -> None:
-        """Read frames in a loop."""
-        frame_size = self.width * self.height * 3
+        """Read frames in a loop with auto-reconnect."""
+        import time
 
-        while self._running and self._process and self._process.poll() is None:
-            try:
-                raw_frame = self._process.stdout.read(frame_size)
-                if len(raw_frame) == frame_size:
-                    frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape(
-                        (self.height, self.width, 3)
-                    )
-                    if self._buffer:
-                        self._buffer.put(frame)
-            except Exception as e:
-                logger.warning(f"Frame read error: {e}")
-                break
+        frame_size = self.width * self.height * 3
+        retry_delay = 1.0  # Initial retry delay
+        max_retry_delay = 10.0
+        consecutive_failures = 0
+
+        while self._running:
+            # Try to connect/reconnect
+            self._process = self._start_ffmpeg()
+
+            if self._process is None:
+                consecutive_failures += 1
+                logger.debug(f"Waiting for stream at {self.stream_url}...")
+                time.sleep(min(retry_delay * consecutive_failures, max_retry_delay))
+                continue
+
+            logger.info(f"Connected to stream {self.stream_url}")
+            consecutive_failures = 0
+
+            # Read frames until connection drops
+            while self._running and self._process and self._process.poll() is None:
+                try:
+                    raw_frame = self._process.stdout.read(frame_size)
+                    if len(raw_frame) == frame_size:
+                        frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape(
+                            (self.height, self.width, 3)
+                        )
+                        if self._buffer:
+                            self._buffer.put(frame)
+                    elif len(raw_frame) == 0:
+                        # Stream ended
+                        break
+                except Exception as e:
+                    logger.warning(f"Frame read error: {e}")
+                    break
+
+            # Clean up process before retry
+            if self._process:
+                try:
+                    self._process.terminate()
+                    self._process.wait(timeout=1)
+                except Exception:
+                    try:
+                        self._process.kill()
+                    except Exception:
+                        pass
+                self._process = None
+
+            if self._running:
+                logger.debug(f"Stream {self.stream_url} disconnected, retrying...")
+                time.sleep(retry_delay)
 
     def stop(self) -> None:
         """Stop reading frames."""
